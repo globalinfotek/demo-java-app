@@ -1,0 +1,61 @@
+APP_NAME = "demo-java-app"
+GIT_BRANCH = 'ci-pipeline'
+GIT_REPO_URL = "git@${env.GIT_HOST}:usaf-cyber/${APP_NAME}.git"
+
+MAJOR_VERSION = 1
+MINOR_VERSION = 0
+
+node {
+
+	currentBuild.displayName = GIT_BRANCH
+
+	stage('initialize') {
+		SERVICE_VERSION = "${MAJOR_VERSION}.${MINOR_VERSION}.${env.BUILD_NUMBER}"
+		currentBuild.displayName = GIT_BRANCH + "-" + SERVICE_VERSION
+		cleanDisplayName = currentBuild.displayName.replace(' ', '_').replace('.', '_').toLowerCase()
+
+		sh 'rm -rf *'
+		sh "git clone ${GIT_REPO_URL}"
+	}
+
+	dir (APP_NAME) {
+		stage('build') {
+			sh "git checkout ${GIT_BRANCH}"
+			sh 'git pull origin master'
+			sh "./gradlew clean assemble"
+			docker.withRegistry("http://${env.DOCKER_REGISTRY}", 'docker-registry-login') {
+				sh "docker build -t ${env.DOCKER_REGISTRY}/${APP_NAME}:${SERVICE_VERSION} --build-arg VERSION=${SERVICE_VERSION} -f docker/Dockerfile ."
+			}
+		}
+
+		stage('test') {
+			try {
+				sh """
+				./gradlew test intTest
+			"""
+			} finally {
+				archive "build/reports/tests/**"
+				archive "build/reports/intTest/**"
+				publishHTML([allowMissing         : true,
+							 alwaysLinkToLastBuild: false,
+							 keepAll              : true,
+							 reportDir            : 'build/reports/jacoco/test/html/',
+							 reportFiles          : 'index.html',
+							 reportName           : 'Jacoco Coverage Report'])
+				junit "build/test-results/**/TEST-*.xml"
+			}
+		}
+
+		stage('integration') {
+			sh "git push origin ${GIT_BRANCH}"
+			sh "git checkout master"
+			sh "git merge ${GIT_BRANCH} --no-edit"
+			sh "git push origin master"
+			sh "git tag -a -f -m 'Jenkins Tag' ${SERVICE_VERSION}"
+			sh "git push --tags"
+			docker.withRegistry("http://${env.DOCKER_REGISTRY}", 'docker-registry-login') {
+				sh "docker push ${env.DOCKER_REGISTRY}/${APP_NAME}:${SERVICE_VERSION}"
+			}
+		}
+	}
+}

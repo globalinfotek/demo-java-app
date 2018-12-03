@@ -1,0 +1,7 @@
+service:
+  name: int-test
+  version: test
+  updateHost: localhost
+  updatePort: 9500
+
+server.port: ${service.updatePort}

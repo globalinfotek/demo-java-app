@@ -1,0 +1,5 @@
+service:
+  name: demo-java-app
+  version: ${SERVICE_VERSION:unknown}
+  updateHost: ${UPDATE_HOST:localhost}
+  updatePort: ${UPDATE_PORT:8401}

@@ -1,0 +1,83 @@
+APP_NAME = "demo-java-app"
+GIT_REPO_URL = "git@${env.GIT_HOST}:usaf-cyber/${APP_NAME}.git"
+
+node {
+	println "Deploying [ VERSION:${VERSION} ]"
+
+	def deployEnv = "${DEPLOY_ENV}".toLowerCase()
+	def ocpProject = "usaf-${deployEnv}"
+	def ocpImageStream = "${APP_NAME}-${deployEnv}"
+	def registry = env.DOCKER_REGISTRY
+
+	def userId = "Jenkins"
+
+	wrap([$class: 'BuildUser']) {
+		if(env.BUILD_USER_ID) {
+			userId = env.BUILD_USER_ID
+		}
+	}
+
+	sh 'rm -rf *'
+	sh "git clone ${GIT_REPO_URL}"
+	dir(APP_NAME) {
+		def latestTag = sh(returnStdout: true, script: "git describe --abbrev=0 --tags").trim()
+		GIT_DEPLOY_TAG = defaultIfBlank(VERSION, latestTag)
+		DOCKER_TAG = defaultIfBlank(VERSION, latestTag)
+		GIT_SCRIPT_TAG = defaultIfBlank(VERSION, latestTag)
+		sh "git checkout refs/tags/${GIT_DEPLOY_TAG}"
+		DeployUtil = load 'jenkins/deploy_util.groovy'
+	}
+
+	currentBuild.displayName = "${DEPLOY_ENV}-${DOCKER_TAG}"
+
+	deploymentEmail("Started")
+
+	try {
+		stage ("OpenShift Login") {
+			setCurrentProject(ocpProject)
+		}
+
+		stage ("OpenShift Deploy") {
+			println "Initiating OpenShift image trigger [ environment = ${DEPLOY_ENV} ]."
+			def map = [:]
+			map.put('registry', "${registry}")
+			map.put('project', "${ocpProject}")
+			map.put('image', "${APP_NAME}")
+			map.put('tag', "${DOCKER_TAG}")
+			map.put('label', "${ocpImageStream}")
+			map.put('env', "${DEPLOY_ENV}")
+			DeployUtil.deploy(map)
+		}
+		deploymentEmail("Success")
+		currentBuild.result = 'SUCCESS'
+	} catch (Throwable e) {
+		deploymentEmail("Failed")
+		currentBuild.result = 'FAILURE'
+		println e
+	}
+}
+
+def defaultIfBlank(input, default_value) {
+	if (input == null || input.trim() == "") {
+		return default_value
+	}
+	return input
+}
+
+def deploymentEmail(status) {
+}
+
+def setCurrentProject(project) {
+	println "Attempting oc login to [ ${env.OCP_URL} ] [ project = ${project} ]."
+	withCredentials([string(credentialsId: 'ocp-cluster-login-token', variable: 'OCP_TOKEN')]) {
+		try {
+			println "Attempting to change current OpenShift project to [ ${project} ]"
+			sh """
+				oc login --insecure-skip-tls-verify ${env.OCP_URL} --token=${OCP_TOKEN}
+				oc project --insecure-skip-tls-verify ${project}
+			"""
+		} catch (Exception e) {
+			error("An exception occurred while attempting to use the OCP project.")
+		}
+	}
+}

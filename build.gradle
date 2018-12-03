@@ -1,0 +1,97 @@
+buildscript {
+	ext {
+		springBootVersion = '2.0.0.RELEASE'
+	}
+	repositories {
+		mavenCentral()
+	}
+	dependencies {
+		classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+		classpath("org.sonarsource.scanner.gradle:sonarqube-gradle-plugin:2.6")
+	}
+}
+
+apply plugin: 'jacoco'
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'io.spring.dependency-management'
+apply plugin: 'org.sonarqube'
+
+sourceCompatibility = 1.8
+
+repositories {
+	mavenCentral()
+}
+
+configurations {
+	intTestCompile.extendsFrom testCompile
+	intTestRuntime.extendsFrom testRuntime
+}
+
+dependencies {
+	compile('org.apache.commons:commons-lang3:3.7')
+	compile('org.springframework.boot:spring-boot-starter')
+	compile('org.springframework.boot:spring-boot-starter-web')
+	compile("com.fasterxml.jackson.core:jackson-databind")
+	testCompile('org.springframework.boot:spring-boot-starter-test')
+}
+
+sourceSets {
+	intTest {
+		java {
+			compileClasspath += main.output + test.output
+			runtimeClasspath += main.output + test.output
+		}
+	}
+}
+
+bootRun {
+	systemProperties = System.properties
+}
+
+bootJar {
+	baseName = "${projectName}"
+	archiveName = baseName + '.jar'
+}
+
+/*******************************************
+ *
+ * [ Test ]
+ *
+ *******************************************/
+test {
+	jacoco {
+		append = true
+		destinationFile = file("${buildDir}/jacoco/jacocoTest.exec")
+		classDumpDir = file("${buildDir}/out/classes/test")
+	}
+	finalizedBy jacocoTestReport
+}
+
+task intTest(type:Test){
+	description = "Run integration tests (located in src/intTest/...). These tests make Java service layer calls to emulate service interactions."
+	testClassesDirs = project.sourceSets.intTest.output.classesDirs.getAsFileTree()
+	classpath = project.sourceSets.intTest.runtimeClasspath
+	reports.html.destination = file('build/reports/intTest/')
+	jacoco {
+		append = true
+		destinationFile = file("$buildDir/jacoco/jacocoTest.exec")
+		classDumpDir = file("$buildDir/out/classes/intTest")
+	}
+	finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+	reports {
+		xml.enabled true
+		xml.destination file("${buildDir}/reports/jacoco.xml")
+		html.destination file("${buildDir}/reports/jacocoHtml")
+	}
+	executionData test, intTest
+	afterEvaluate {
+		classDirectories = files(classDirectories.files.collect {
+			fileTree(dir: it, exclude: [ ])
+		})
+	}
+}
